@@ -55,6 +55,17 @@ export default function Employees() {
     }
   };
 
+  const handleDelete = async (emp) => {
+    if (!confirm(`¿Estás seguro de que deseas eliminar permanentemente a "${emp.name}"?\n\nEsta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/employees/${emp.id}/permanent`);
+      toast.success('Usuario eliminado permanentemente');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al eliminar');
+    }
+  };
+
   const handleReactivate = async (emp) => {
     try {
       await api.put(`/employees/${emp.id}`, { active: true });
@@ -101,6 +112,7 @@ export default function Employees() {
                     ? <button onClick={() => handleDeactivate(emp)} className="btn-danger btn-sm">Desactivar</button>
                     : <button onClick={() => handleReactivate(emp)} className="btn btn-sm bg-green-600 text-white hover:bg-green-700 focus:ring-green-500">Reactivar</button>
                   }
+                  <button onClick={() => handleDelete(emp)} className="btn btn-sm bg-red-700 text-white hover:bg-red-800">Eliminar</button>
                 </td>
               </tr>
             ))}

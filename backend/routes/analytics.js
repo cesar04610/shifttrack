@@ -86,17 +86,48 @@ router.get('/cash-audits', auth, requireAdmin, (req, res) => {
 
   const sessions = db.prepare(query).all(...params);
 
-  const result = sessions.map(session => {
-    const shiftChanges = db.prepare(`
-      SELECT sc.*, u_out.name AS outgoing_name, u_in.name AS incoming_name
-      FROM supplier_shift_changes sc
-      JOIN users u_out ON sc.outgoing_user = u_out.id
-      JOIN users u_in  ON sc.incoming_user = u_in.id
-      WHERE sc.session_id = ?
-      ORDER BY sc.changed_at ASC
-    `).all(session.id);
-    return { ...session, shift_changes: shiftChanges };
-  });
+  const stmtShiftChanges = db.prepare(`
+    SELECT sc.*, u_out.name AS outgoing_name, u_in.name AS incoming_name
+    FROM supplier_shift_changes sc
+    JOIN users u_out ON sc.outgoing_user = u_out.id
+    JOIN users u_in  ON sc.incoming_user = u_in.id
+    WHERE sc.session_id = ?
+    ORDER BY sc.changed_at ASC
+  `);
+
+  const stmtTickets = db.prepare(`
+    SELECT pt.id, pt.registered_at, pt.amount, pt.note, pt.is_voided, pt.void_reason,
+           s.company_name AS supplier_name, u.name AS employee_name
+    FROM purchase_tickets pt
+    JOIN suppliers s ON pt.supplier_id = s.id
+    JOIN users u ON pt.employee_id = u.id
+    WHERE pt.session_id = ?
+    ORDER BY pt.registered_at ASC
+  `);
+
+  const stmtAdditions = db.prepare(`
+    SELECT ba.id, ba.added_at, ba.amount, u.name AS user_name
+    FROM caja3_balance_additions ba
+    JOIN users u ON ba.added_by = u.id
+    WHERE ba.session_id = ?
+    ORDER BY ba.added_at ASC
+  `);
+
+  const stmtShiftEnds = db.prepare(`
+    SELECT se.id, se.ended_at, se.expected_balance, se.declared_balance, se.difference, u.name AS user_name
+    FROM caja3_shift_ends se
+    JOIN users u ON se.user_id = u.id
+    WHERE se.session_id = ?
+    ORDER BY se.ended_at ASC
+  `);
+
+  const result = sessions.map(session => ({
+    ...session,
+    shift_changes: stmtShiftChanges.all(session.id),
+    tickets:       stmtTickets.all(session.id),
+    additions:     stmtAdditions.all(session.id),
+    shiftEnds:     stmtShiftEnds.all(session.id),
+  }));
 
   res.json(result);
 });

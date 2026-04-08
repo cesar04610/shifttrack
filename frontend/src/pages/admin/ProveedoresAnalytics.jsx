@@ -164,6 +164,226 @@ function TabPromedios() {
   );
 }
 
+// ── Cuadres: helpers de timeline ──────────────────────────────────────────────
+function buildTimeline(session) {
+  const events = [];
+  for (const t of session.tickets || [])
+    events.push({ time: t.registered_at, type: t.is_voided ? 'ticket_void' : 'ticket', ...t });
+  for (const a of session.additions || [])
+    events.push({ time: a.added_at, type: 'addition', ...a });
+  for (const sc of session.shift_changes || [])
+    events.push({ time: sc.changed_at, type: 'shift_change', ...sc });
+  for (const se of session.shiftEnds || [])
+    events.push({ time: se.ended_at, type: 'shift_end', ...se });
+
+  events.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+  let balance = session.initial_balance;
+  return events.map(ev => {
+    if (ev.type === 'ticket')   balance -= ev.amount;
+    if (ev.type === 'addition') balance += ev.amount;
+    return { ...ev, balance_after: balance };
+  });
+}
+
+function diffColor(diff) {
+  if (diff === null || diff === undefined) return '';
+  if (diff < 0) return 'text-red-600';
+  if (diff > 0) return 'text-blue-600';
+  return 'text-green-600';
+}
+
+function TimelineRow({ ev }) {
+  const time = new Date(ev.time).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
+  if (ev.type === 'ticket') {
+    return (
+      <div className="flex items-start justify-between py-1.5 text-xs border-b border-gray-100">
+        <div className="flex items-start gap-2 min-w-0">
+          <span className="text-gray-400 shrink-0">{time}</span>
+          <span className="text-red-400 shrink-0">💸</span>
+          <div className="min-w-0">
+            <span className="font-medium text-gray-800">{ev.supplier_name}</span>
+            <span className="text-gray-400 ml-1">· {ev.employee_name}</span>
+            {ev.note && <span className="text-gray-400 ml-1">· {ev.note}</span>}
+          </div>
+        </div>
+        <div className="text-right shrink-0 ml-3">
+          <p className="font-semibold text-red-600">-${formatMXN(ev.amount)}</p>
+          <p className="text-gray-400">${formatMXN(ev.balance_after)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (ev.type === 'ticket_void') {
+    return (
+      <div className="flex items-start justify-between py-1.5 text-xs border-b border-gray-100 opacity-50">
+        <div className="flex items-start gap-2 min-w-0">
+          <span className="text-gray-400 shrink-0">{time}</span>
+          <span className="shrink-0">❌</span>
+          <div className="min-w-0">
+            <span className="line-through text-gray-500">{ev.supplier_name}</span>
+            <span className="text-gray-400 ml-1">Anulado</span>
+            {ev.void_reason && <span className="text-gray-400 ml-1">· {ev.void_reason}</span>}
+          </div>
+        </div>
+        <p className="text-gray-400 shrink-0 ml-3">-${formatMXN(ev.amount)}</p>
+      </div>
+    );
+  }
+
+  if (ev.type === 'addition') {
+    return (
+      <div className="flex items-start justify-between py-1.5 text-xs border-b border-gray-100">
+        <div className="flex items-start gap-2">
+          <span className="text-gray-400 shrink-0">{time}</span>
+          <span className="shrink-0">➕</span>
+          <span className="font-medium text-gray-800">Adición de saldo <span className="font-normal text-gray-400">· {ev.user_name}</span></span>
+        </div>
+        <div className="text-right shrink-0 ml-3">
+          <p className="font-semibold text-green-600">+${formatMXN(ev.amount)}</p>
+          <p className="text-gray-400">${formatMXN(ev.balance_after)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (ev.type === 'shift_change') {
+    return (
+      <div className="py-2 border-b border-blue-100 bg-blue-50 rounded px-2 text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 shrink-0">{time}</span>
+            <span>🔄</span>
+            <span className="font-medium text-blue-800">
+              {ev.outgoing_name} → {ev.incoming_name}
+            </span>
+          </div>
+          {ev.difference_at_change !== null && (
+            <span className={`font-semibold shrink-0 ml-3 ${diffColor(ev.difference_at_change)}`}>
+              {ev.difference_at_change >= 0 ? '+' : ''}${formatMXN(ev.difference_at_change)}
+            </span>
+          )}
+        </div>
+        <div className="mt-1 flex gap-4 text-gray-500 pl-6">
+          <span>Esperado: ${formatMXN(ev.expected_at_change)}</span>
+          {ev.cash_at_change !== null && <span>Declarado: ${formatMXN(ev.cash_at_change)}</span>}
+        </div>
+      </div>
+    );
+  }
+
+  if (ev.type === 'shift_end') {
+    return (
+      <div className="py-2 border-b border-orange-100 bg-orange-50 rounded px-2 text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 shrink-0">{time}</span>
+            <span>🔒</span>
+            <span className="font-medium text-orange-800">Cierre de turno · {ev.user_name}</span>
+          </div>
+          <span className={`font-semibold shrink-0 ml-3 ${diffColor(ev.difference)}`}>
+            {ev.difference >= 0 ? '+' : ''}${formatMXN(ev.difference)}
+          </span>
+        </div>
+        <div className="mt-1 flex gap-4 text-gray-500 pl-6">
+          <span>Esperado: ${formatMXN(ev.expected_balance)}</span>
+          <span>Declarado: ${formatMXN(ev.declared_balance)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function SessionCard({ session }) {
+  const [expanded, setExpanded] = useState(false);
+  const timeline = buildTimeline(session);
+  const totalTickets = (session.tickets || []).filter(t => !t.is_voided).length;
+  const totalSpent   = (session.tickets || []).filter(t => !t.is_voided).reduce((s, t) => s + t.amount, 0);
+
+  return (
+    <div className="bg-white rounded-xl border overflow-hidden">
+      <div className="p-5">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <span className="font-semibold text-gray-800">{session.session_date}</span>
+            <span className="text-xs text-gray-400 ml-2">
+              Abierto por {session.opened_by_name}
+              {session.closed_by_name && ` · Cerrado por ${session.closed_by_name}`}
+            </span>
+          </div>
+          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+            session.closed_at ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+          }`}>
+            {session.closed_at ? 'Cerrado' : 'Abierto'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+          <div className="bg-gray-50 rounded-lg p-2">
+            <p className="text-xs text-gray-500">Saldo inicial</p>
+            <p className="font-semibold">${formatMXN(session.initial_balance)}</p>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-2">
+            <p className="text-xs text-gray-500">Total pagado</p>
+            <p className="font-semibold text-red-600">-${formatMXN(totalSpent)}</p>
+            <p className="text-xs text-gray-400">{totalTickets} ticket{totalTickets !== 1 ? 's' : ''}</p>
+          </div>
+          {session.expected_balance !== null && (
+            <div className="bg-gray-50 rounded-lg p-2">
+              <p className="text-xs text-gray-500">Saldo esperado</p>
+              <p className="font-semibold">${formatMXN(session.expected_balance)}</p>
+            </div>
+          )}
+          {session.real_balance !== null && (
+            <div className="bg-gray-50 rounded-lg p-2">
+              <p className="text-xs text-gray-500">Saldo declarado</p>
+              <p className="font-semibold">${formatMXN(session.real_balance)}</p>
+            </div>
+          )}
+          {session.cash_difference !== null && (
+            <div className={`rounded-lg p-2 col-span-2 ${
+              session.cash_difference < 0 ? 'bg-red-50' : session.cash_difference > 0 ? 'bg-blue-50' : 'bg-green-50'
+            }`}>
+              <p className="text-xs text-gray-500">Diferencia final</p>
+              <p className={`font-bold ${diffColor(session.cash_difference)}`}>
+                {session.cash_difference >= 0 ? '+' : ''}${formatMXN(session.cash_difference)}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {timeline.length > 0 && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+          >
+            {expanded ? '▲ Ocultar movimientos' : `▼ Ver ${timeline.length} movimiento${timeline.length !== 1 ? 's' : ''}`}
+          </button>
+        )}
+      </div>
+
+      {expanded && (
+        <div className="border-t bg-gray-50 px-5 py-3">
+          <div className="flex items-center justify-between text-xs text-gray-500 py-1.5 border-b border-gray-200 mb-1">
+            <div className="flex items-center gap-2">
+              <span>🏦</span>
+              <span className="font-medium">Saldo inicial · {session.opened_by_name}</span>
+            </div>
+            <span className="font-semibold text-gray-700">${formatMXN(session.initial_balance)}</span>
+          </div>
+          <div className="space-y-0.5">
+            {timeline.map((ev, i) => <TimelineRow key={i} ev={ev} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Pestaña: Cuadres de caja ──────────────────────────────────────────────────
 function TabCuadres({ from, to }) {
   const [data, setData] = useState(null);
@@ -182,74 +402,7 @@ function TabCuadres({ from, to }) {
 
   return (
     <div className="space-y-4">
-      {data.map(session => (
-        <div key={session.id} className="bg-white rounded-xl border p-5">
-          <div className="flex items-start justify-between mb-3">
-            <div>
-              <span className="font-semibold text-gray-800">{session.session_date}</span>
-              <span className="text-xs text-gray-400 ml-2">
-                Abierto por {session.opened_by_name}
-                {session.closed_by_name && ` · Cerrado por ${session.closed_by_name}`}
-              </span>
-            </div>
-            <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-              session.closed_at ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-            }`}>
-              {session.closed_at ? 'Cerrado' : 'Abierto'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-            <div className="bg-gray-50 rounded-lg p-2">
-              <p className="text-xs text-gray-500">Saldo inicial</p>
-              <p className="font-semibold">${formatMXN(session.initial_balance)}</p>
-            </div>
-            {session.expected_balance !== null && (
-              <div className="bg-gray-50 rounded-lg p-2">
-                <p className="text-xs text-gray-500">Saldo esperado</p>
-                <p className="font-semibold">${formatMXN(session.expected_balance)}</p>
-              </div>
-            )}
-            {session.real_balance !== null && (
-              <div className="bg-gray-50 rounded-lg p-2">
-                <p className="text-xs text-gray-500">Saldo declarado</p>
-                <p className="font-semibold">${formatMXN(session.real_balance)}</p>
-              </div>
-            )}
-            {session.cash_difference !== null && (
-              <div className={`rounded-lg p-2 ${
-                session.cash_difference < 0 ? 'bg-red-50' : session.cash_difference > 0 ? 'bg-blue-50' : 'bg-green-50'
-              }`}>
-                <p className="text-xs text-gray-500">Diferencia</p>
-                <p className={`font-bold ${
-                  session.cash_difference < 0 ? 'text-red-600' : session.cash_difference > 0 ? 'text-blue-600' : 'text-green-600'
-                }`}>
-                  {session.cash_difference >= 0 ? '+' : ''}${formatMXN(session.cash_difference)}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Cambios de turno */}
-          {session.shift_changes?.length > 0 && (
-            <div className="border-t pt-3 mt-2">
-              <p className="text-xs font-medium text-gray-500 mb-2">Cambios de turno</p>
-              <div className="space-y-1">
-                {session.shift_changes.map(sc => (
-                  <div key={sc.id} className="text-xs text-gray-600 flex justify-between">
-                    <span>🔄 {sc.outgoing_name} → {sc.incoming_name} · {formatDateTime(sc.changed_at)}</span>
-                    {sc.difference_at_change !== null && (
-                      <span className={sc.difference_at_change < 0 ? 'text-red-500' : 'text-green-600'}>
-                        {sc.difference_at_change >= 0 ? '+' : ''}${formatMXN(sc.difference_at_change)}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
+      {data.map(session => <SessionCard key={session.id} session={session} />)}
     </div>
   );
 }

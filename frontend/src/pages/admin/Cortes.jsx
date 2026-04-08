@@ -28,7 +28,7 @@ function ReliabilityBadge({ count }) {
 // ── Tab: Lista ────────────────────────────────────────────────────────────────
 function TabLista({ employees }) {
   const today = new Date().toISOString().split('T')[0];
-  const [filters, setFilters] = useState({ employee_id: '', register: '', from: today, to: today });
+  const [filters, setFilters] = useState({ employee_id: '', register: '', shift_label: '', from: today, to: today });
   const [cuts, setCuts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -78,8 +78,22 @@ function TabLista({ employees }) {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Caja</label>
-          <input value={filters.register} onChange={e => setFilters(f => ({ ...f, register: e.target.value }))}
-            placeholder="Todas" className="border rounded-lg px-2 py-1.5 text-sm w-28 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <select value={filters.register} onChange={e => setFilters(f => ({ ...f, register: e.target.value }))}
+            className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">Todas</option>
+            <option value="Caja 1">Caja 1</option>
+            <option value="Caja 2">Caja 2</option>
+            <option value="Caja 3">Caja 3</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Turno</label>
+          <select value={filters.shift_label || ''} onChange={e => setFilters(f => ({ ...f, shift_label: e.target.value }))}
+            className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">Todos</option>
+            <option value="Mañana">Mañana</option>
+            <option value="Tarde">Tarde</option>
+          </select>
         </div>
         <button onClick={handleExport} className="ml-auto flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700">
           📥 Exportar .xlsx
@@ -95,7 +109,7 @@ function TabLista({ employees }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b">
-                {['Fecha','Usuario','Caja','Ventas','Tarjeta','Ef. Esperado','Ef. Declarado','Diferencia'].map(h => (
+                {['Fecha','Usuario','Caja','Turno','Ventas','Tarjeta','Ef. Esperado','Ef. Declarado','Diferencia'].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -108,6 +122,11 @@ function TabLista({ employees }) {
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(cut.shift_date)}</td>
                   <td className="px-4 py-3 font-medium">{cut.employee_name}</td>
                   <td className="px-4 py-3">{cut.register_name}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cut.shift_label === 'Mañana' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                      {cut.shift_label || '—'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">${formatMXN(cut.total_sales)}</td>
                   <td className="px-4 py-3">${formatMXN(cut.card_payments)}</td>
                   <td className="px-4 py-3">${formatMXN(cut.expected_cash)}</td>
@@ -138,7 +157,8 @@ function TabLista({ employees }) {
                 ['Usuario', selected.employee_name],
                 ['Caja', selected.register_name],
                 ['Fecha', formatDate(selected.shift_date)],
-                ['Turno', `${selected.start_time}–${selected.end_time}`],
+                ['Turno', selected.shift_label || '—'],
+                ['Horario', selected.start_time ? `${selected.start_time}–${selected.end_time}` : '—'],
                 ['Ventas totales', `$${formatMXN(selected.total_sales)}`],
                 ['Pagos tarjeta', `$${formatMXN(selected.card_payments)}`],
                 ['Ef. esperado', `$${formatMXN(selected.expected_cash)}`],

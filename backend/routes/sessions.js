@@ -7,23 +7,43 @@ const { getLocalToday, getLocalISOString } = require('../utils/dateUtils');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getTotalSpent(sessionId) {
+function getLastShiftEnd(sessionId) {
   return db.prepare(
-    'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0'
-  ).get(sessionId).total;
-}
-
-function getTotalAdditions(sessionId) {
-  return db.prepare(
-    'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ?'
-  ).get(sessionId).total;
+    'SELECT declared_balance, ended_at FROM caja3_shift_ends WHERE session_id = ? ORDER BY ended_at DESC LIMIT 1'
+  ).get(sessionId);
 }
 
 function computeBalance(session) {
-  const total_spent = getTotalSpent(session.id);
-  const total_additions = getTotalAdditions(session.id);
-  const current_balance = session.initial_balance + total_additions - total_spent;
-  return { total_spent, total_additions, current_balance };
+  const lastEnd = getLastShiftEnd(session.id);
+
+  if (lastEnd) {
+    // Contar solo movimientos DESPUÉS del último cierre de turno
+    const total_spent = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0 AND registered_at > ?'
+    ).get(session.id, lastEnd.ended_at).total;
+    const total_additions = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ? AND added_at > ?'
+    ).get(session.id, lastEnd.ended_at).total;
+    return {
+      total_spent,
+      total_additions,
+      current_balance: lastEnd.declared_balance + total_additions - total_spent,
+      effective_initial: lastEnd.declared_balance,
+    };
+  }
+
+  const total_spent = db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0'
+  ).get(session.id).total;
+  const total_additions = db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ?'
+  ).get(session.id).total;
+  return {
+    total_spent,
+    total_additions,
+    current_balance: session.initial_balance + total_additions - total_spent,
+    effective_initial: session.initial_balance,
+  };
 }
 
 // GET /api/sessions/today — sesión activa del día (cualquier rol puede consultarla)
@@ -104,10 +124,10 @@ router.get('/current-balance', auth, (req, res) => {
     return res.json({ expected_balance: persistent ? persistent.balance : 0 });
   }
 
-  const { total_spent, total_additions, current_balance } = computeBalance(session);
+  const { total_spent, total_additions, current_balance, effective_initial } = computeBalance(session);
   res.json({
     session_id: session.id,
-    initial_balance: session.initial_balance,
+    initial_balance: effective_initial,
     total_additions,
     total_spent,
     expected_balance: current_balance,

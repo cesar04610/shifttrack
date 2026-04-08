@@ -41,9 +41,9 @@ router.post('/', auth, requireAdmin, (req, res) => {
   const passwordHash = bcrypt.hashSync(password, 10);
 
   db.prepare(`
-    INSERT INTO users (id, email, password_hash, name, role, phone, active)
-    VALUES (?, ?, ?, ?, 'employee', ?, 1)
-  `).run(id, null, passwordHash, name.trim(), phone || null);
+    INSERT INTO users (id, password_hash, name, role, phone, active)
+    VALUES (?, ?, ?, 'employee', ?, 1)
+  `).run(id, passwordHash, name.trim(), phone || null);
 
   res.status(201).json({ id, name: name.trim(), role: 'employee', phone: phone || null, active: 1 });
 });
@@ -85,6 +85,22 @@ router.delete('/:id', auth, requireAdmin, (req, res) => {
 
   db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(req.params.id);
   res.json({ message: 'Usuario desactivado correctamente' });
+});
+
+// DELETE /api/employees/:id/permanent — eliminar usuario permanentemente (admin)
+router.delete('/:id/permanent', auth, requireAdmin, (req, res) => {
+  const employee = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'employee'").get(req.params.id);
+  if (!employee) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+  try {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+    db.exec('PRAGMA foreign_keys = ON');
+    res.json({ message: 'Usuario eliminado permanentemente' });
+  } catch (err) {
+    db.exec('PRAGMA foreign_keys = ON');
+    res.status(500).json({ error: 'No se pudo eliminar el usuario' });
+  }
 });
 
 module.exports = router;

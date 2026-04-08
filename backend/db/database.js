@@ -330,4 +330,183 @@ db.exec(`
   );
 `);
 
+// ─── Migración: agregar columna date a cash_register_cuts ───────────────────
+{
+  const cols = db.prepare("PRAGMA table_info(cash_register_cuts)").all().map(c => c.name);
+  if (!cols.includes('date')) {
+    db.exec("ALTER TABLE cash_register_cuts ADD COLUMN date TEXT");
+    console.log('[DB] Migración: columna date agregada a cash_register_cuts.');
+  }
+}
+
+// ─── Migración: hacer schedule_id nullable en cash_register_cuts ─────────────
+// Los clock_records pueden no tener schedule_id (fichajes sin turno programado),
+// por lo que el INSERT fallaba con NOT NULL constraint violation.
+{
+  const colInfo = db.prepare("PRAGMA table_info(cash_register_cuts)").all();
+  const schedCol = colInfo.find(c => c.name === 'schedule_id');
+  if (schedCol && schedCol.notnull === 1) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE cash_register_cuts_new (
+        id            TEXT PRIMARY KEY,
+        employee_id   TEXT NOT NULL REFERENCES users(id),
+        schedule_id   TEXT REFERENCES schedules(id),
+        register_name TEXT NOT NULL,
+        total_sales   REAL NOT NULL,
+        card_payments REAL NOT NULL,
+        declared_cash REAL NOT NULL,
+        notes         TEXT,
+        expected_cash REAL NOT NULL,
+        cash_difference REAL NOT NULL,
+        is_anomaly    INTEGER NOT NULL DEFAULT 0,
+        deviation_pct REAL,
+        submitted_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+        date          TEXT,
+        UNIQUE(employee_id, date)
+      );
+
+      INSERT INTO cash_register_cuts_new
+        SELECT id, employee_id, schedule_id, register_name, total_sales,
+               card_payments, declared_cash, notes, expected_cash, cash_difference,
+               is_anomaly, deviation_pct, submitted_at, date
+        FROM cash_register_cuts;
+
+      DROP TABLE cash_register_cuts;
+
+      ALTER TABLE cash_register_cuts_new RENAME TO cash_register_cuts;
+
+      COMMIT;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
+    console.log('[DB] Migración: schedule_id ahora es nullable en cash_register_cuts.');
+  }
+}
+
+// ─── Migración: hacer schedule_id nullable en cut_alerts ─────────────────────
+{
+  const colInfo = db.prepare("PRAGMA table_info(cut_alerts)").all();
+  const schedCol = colInfo.find(c => c.name === 'schedule_id');
+  if (schedCol && schedCol.notnull === 1) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE cut_alerts_new (
+        id           TEXT PRIMARY KEY,
+        alert_type   TEXT NOT NULL CHECK(alert_type IN ('missing_cut','anomaly_detected')),
+        employee_id  TEXT NOT NULL REFERENCES users(id),
+        schedule_id  TEXT REFERENCES schedules(id),
+        cut_id       TEXT REFERENCES cash_register_cuts(id),
+        deviation_pct REAL,
+        avg_reference REAL,
+        sample_count INTEGER,
+        is_seen      INTEGER NOT NULL DEFAULT 0,
+        seen_at      TEXT,
+        created_at   TEXT DEFAULT (CURRENT_TIMESTAMP)
+      );
+
+      INSERT INTO cut_alerts_new
+        SELECT id, alert_type, employee_id, schedule_id, cut_id,
+               deviation_pct, avg_reference, sample_count, is_seen, seen_at, created_at
+        FROM cut_alerts;
+
+      DROP TABLE cut_alerts;
+
+      ALTER TABLE cut_alerts_new RENAME TO cut_alerts;
+
+      COMMIT;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
+    console.log('[DB] Migración: schedule_id ahora es nullable en cut_alerts.');
+  }
+}
+
+// ─── Migración: agregar shift_label a cash_register_cuts (mañana/tarde) ─────
+{
+  const cols = db.prepare("PRAGMA table_info(cash_register_cuts)").all().map(c => c.name);
+  if (!cols.includes('shift_label')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE cash_register_cuts_new (
+        id            TEXT PRIMARY KEY,
+        employee_id   TEXT NOT NULL REFERENCES users(id),
+        schedule_id   TEXT REFERENCES schedules(id),
+        register_name TEXT NOT NULL,
+        total_sales   REAL NOT NULL,
+        card_payments REAL NOT NULL,
+        declared_cash REAL NOT NULL,
+        notes         TEXT,
+        expected_cash REAL NOT NULL,
+        cash_difference REAL NOT NULL,
+        is_anomaly    INTEGER NOT NULL DEFAULT 0,
+        deviation_pct REAL,
+        submitted_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+        date          TEXT,
+        shift_label   TEXT NOT NULL DEFAULT 'Mañana',
+        UNIQUE(employee_id, date, shift_label)
+      );
+
+      INSERT INTO cash_register_cuts_new
+        SELECT id, employee_id, schedule_id, register_name, total_sales,
+               card_payments, declared_cash, notes, expected_cash, cash_difference,
+               is_anomaly, deviation_pct, submitted_at, date,
+               CASE
+                 WHEN CAST(strftime('%H', submitted_at) AS INTEGER) * 60
+                    + CAST(strftime('%M', submitted_at) AS INTEGER) >= 450
+                  AND CAST(strftime('%H', submitted_at) AS INTEGER) * 60
+                    + CAST(strftime('%M', submitted_at) AS INTEGER) < 1020
+                 THEN 'Mañana' ELSE 'Tarde'
+               END
+        FROM cash_register_cuts;
+
+      DROP TABLE cash_register_cuts;
+
+      ALTER TABLE cash_register_cuts_new RENAME TO cash_register_cuts;
+
+      COMMIT;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
+    console.log('[DB] Migración: shift_label agregado a cash_register_cuts.');
+  }
+}
+
+// ─── Migración: hacer email nullable en users ────────────────────────────────
+// Los empleados se crean solo con nombre+contraseña, sin email.
+{
+  const colInfo = db.prepare("PRAGMA table_info(users)").all();
+  const emailCol = colInfo.find(c => c.name === 'email');
+  if (emailCol && emailCol.notnull === 1) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE users_new (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE,
+        password_hash TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('admin', 'employee')),
+        phone TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO users_new SELECT * FROM users;
+
+      DROP TABLE users;
+
+      ALTER TABLE users_new RENAME TO users;
+
+      COMMIT;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
+    console.log('[DB] Migración: email ahora es nullable en users.');
+  }
+}
+
 module.exports = db;

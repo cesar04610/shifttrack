@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
 
 function formatMXN(v) {
   return Number(v || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 });
 }
 
 export default function CutForm({ schedule, onSaved, onCancel }) {
+  const { user } = useAuth();
+  const registerName = `Caja ${user?.caja || '?'}`;
+
   const [form, setForm] = useState({
-    register_name: '',
     total_sales: '',
     card_payments: '',
     declared_cash: '',
@@ -20,20 +23,19 @@ export default function CutForm({ schedule, onSaved, onCancel }) {
   const cp = parseFloat(form.card_payments) || 0;
   const dc = parseFloat(form.declared_cash) || 0;
   const expectedCash = ts - cp;
-  const cashDiff = expectedCash - dc;
+  const cashDiff = dc - expectedCash; // positivo = sobrante, negativo = faltante
 
   const handleChange = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.register_name.trim()) { toast.error('Ingresa el nombre de la caja'); return; }
     if (form.total_sales === '') { toast.error('Ingresa las ventas totales'); return; }
     if (form.card_payments === '') { toast.error('Ingresa los pagos con tarjeta'); return; }
     if (form.declared_cash === '') { toast.error('Ingresa el efectivo declarado'); return; }
     setLoading(true);
     try {
       await api.post('/cuts', {
-        register_name: form.register_name,
+        register_name: registerName,
         total_sales: parseFloat(form.total_sales),
         card_payments: parseFloat(form.card_payments),
         declared_cash: parseFloat(form.declared_cash),
@@ -61,16 +63,8 @@ export default function CutForm({ schedule, onSaved, onCancel }) {
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Número / Nombre de caja <span className="text-red-500">*</span></label>
-            <input
-              name="register_name"
-              value={form.register_name}
-              onChange={handleChange}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Ej: Caja 1, Caja Principal..."
-              required
-            />
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 font-medium">
+            {registerName}
           </div>
 
           {[
@@ -112,7 +106,7 @@ export default function CutForm({ schedule, onSaved, onCancel }) {
                 <span className="font-semibold text-gray-700">Diferencia</span>
                 <span className={`font-bold text-base ${diffColor}`}>
                   {cashDiff >= 0 ? '+' : '-'}${formatMXN(Math.abs(cashDiff))}
-                  {cashDiff > 0 ? ' (faltante)' : cashDiff < 0 ? ' (sobrante)' : ' ✓'}
+                  {cashDiff > 0 ? ' (sobrante)' : cashDiff < 0 ? ' (faltante)' : ' ✓'}
                 </span>
               </div>
             </div>

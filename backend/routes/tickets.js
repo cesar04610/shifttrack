@@ -17,13 +17,27 @@ function getActiveSession() {
 }
 
 function getCurrentBalance(sessionId, initialBalance) {
+  const lastEnd = db.prepare(
+    'SELECT declared_balance, ended_at FROM caja3_shift_ends WHERE session_id = ? ORDER BY ended_at DESC LIMIT 1'
+  ).get(sessionId);
+
+  if (lastEnd) {
+    const spent = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0 AND registered_at > ?'
+    ).get(sessionId, lastEnd.ended_at).total;
+    const additions = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ? AND added_at > ?'
+    ).get(sessionId, lastEnd.ended_at).total;
+    return lastEnd.declared_balance + additions - spent;
+  }
+
   const spent = db.prepare(
     'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0'
-  ).get(sessionId);
+  ).get(sessionId).total;
   const additions = db.prepare(
     'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ?'
-  ).get(sessionId);
-  return initialBalance + additions.total - spent.total;
+  ).get(sessionId).total;
+  return initialBalance + additions - spent;
 }
 
 // ─── GET /api/tickets — tickets + separadores de turno de la sesión activa ───
@@ -65,16 +79,31 @@ router.get('/', auth, (req, res) => {
     ORDER BY se.ended_at ASC
   `).all(session.id);
 
-  const total_additions = db.prepare(
-    'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ?'
-  ).get(session.id).total;
+  const lastEnd = db.prepare(
+    'SELECT declared_balance, ended_at FROM caja3_shift_ends WHERE session_id = ? ORDER BY ended_at DESC LIMIT 1'
+  ).get(session.id);
 
-  const total_spent = db.prepare(
-    'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0'
-  ).get(session.id).total;
+  let total_additions, total_spent, effective_initial;
+  if (lastEnd) {
+    total_additions = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ? AND added_at > ?'
+    ).get(session.id, lastEnd.ended_at).total;
+    total_spent = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0 AND registered_at > ?'
+    ).get(session.id, lastEnd.ended_at).total;
+    effective_initial = lastEnd.declared_balance;
+  } else {
+    total_additions = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM caja3_balance_additions WHERE session_id = ?'
+    ).get(session.id).total;
+    total_spent = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM purchase_tickets WHERE session_id = ? AND is_voided = 0'
+    ).get(session.id).total;
+    effective_initial = session.initial_balance;
+  }
 
   const current_balance = getCurrentBalance(session.id, session.initial_balance);
-  res.json({ tickets, shiftChanges, balanceAdditions, shiftEnds, session: { ...session, current_balance, total_additions, total_spent } });
+  res.json({ tickets, shiftChanges, balanceAdditions, shiftEnds, session: { ...session, current_balance, total_additions, total_spent, effective_initial } });
 });
 
 // ─── GET /api/tickets/check — previsualizar alerta antes de confirmar ─────────

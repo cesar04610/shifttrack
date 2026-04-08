@@ -5,7 +5,7 @@ const db = require('../db/database');
 const auth = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/role');
 const ExcelJS = require('exceljs');
-const { getLocalToday } = require('../utils/dateUtils');
+const { getLocalToday, getLocalISOString } = require('../utils/dateUtils');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,16 +48,22 @@ router.get('/active-shift', auth, (req, res) => {
     ? db.prepare('SELECT * FROM schedules WHERE id = ?').get(clockRecord.schedule_id)
     : null;
 
-  // Verificar si ya tiene corte hoy
+  // Determinar turno actual (mañana: 7:30–17:00, tarde: resto)
+  const now = new Date();
+  const minutesOfDay = now.getHours() * 60 + now.getMinutes();
+  const currentShift = (minutesOfDay >= 450 && minutesOfDay < 1020) ? 'Mañana' : 'Tarde';
+
+  // Verificar si ya tiene corte hoy para este turno
   const existingCut = db.prepare(
-    'SELECT id, submitted_at FROM cash_register_cuts WHERE employee_id = ? AND date = ?'
-  ).get(req.user.id, today);
+    'SELECT id, submitted_at, shift_label FROM cash_register_cuts WHERE employee_id = ? AND date = ? AND shift_label = ?'
+  ).get(req.user.id, today, currentShift);
 
   res.json({
     has_active_shift: true,
     schedule: schedule || { id: null, date: today, start_time: null, end_time: null },
     clock_record: clockRecord,
     existing_cut: existingCut || null,
+    current_shift: currentShift,
   });
 });
 
@@ -305,7 +311,7 @@ router.get('/report', auth, requireAdmin, async (req, res) => {
 
 // ── GET /api/cuts — lista admin con filtros ───────────────────────────────────
 router.get('/', auth, requireAdmin, (req, res) => {
-  const { employee_id, register, from, to } = req.query;
+  const { employee_id, register, from, to, shift_label } = req.query;
   let query = `
     SELECT c.*, COALESCE(c.date, s.date) AS shift_date, s.start_time, s.end_time,
            u.name AS employee_name
@@ -317,6 +323,7 @@ router.get('/', auth, requireAdmin, (req, res) => {
   const params = [];
   if (employee_id) { query += ' AND c.employee_id = ?'; params.push(employee_id); }
   if (register) { query += ' AND c.register_name = ?'; params.push(register); }
+  if (shift_label) { query += ' AND c.shift_label = ?'; params.push(shift_label); }
   if (from) { query += ' AND COALESCE(c.date, s.date) >= ?'; params.push(from); }
   if (to) { query += ' AND COALESCE(c.date, s.date) <= ?'; params.push(to); }
   query += ' ORDER BY shift_date DESC, c.submitted_at DESC LIMIT 500';
@@ -368,12 +375,17 @@ router.post('/', auth, async (req, res) => {
 
   const scheduleId = clockRecord.schedule_id || null;
 
-  // Verificar que no exista corte previo hoy
+  // Determinar turno (mañana: 7:30–17:00, tarde: resto)
+  const now = new Date();
+  const minutesOfDay = now.getHours() * 60 + now.getMinutes();
+  const shift_label = (minutesOfDay >= 450 && minutesOfDay < 1020) ? 'Mañana' : 'Tarde';
+
+  // Verificar que no exista corte previo hoy para este turno
   const existingCut = db.prepare(
-    'SELECT id FROM cash_register_cuts WHERE employee_id = ? AND date = ?'
-  ).get(req.user.id, today);
+    'SELECT id FROM cash_register_cuts WHERE employee_id = ? AND date = ? AND shift_label = ?'
+  ).get(req.user.id, today, shift_label);
   if (existingCut) {
-    return res.status(409).json({ error: 'Ya registraste tu corte de hoy' });
+    return res.status(409).json({ error: `Ya registraste tu corte de ${shift_label.toLowerCase()} hoy` });
   }
 
   // Cálculos del servidor
@@ -381,7 +393,7 @@ router.post('/', auth, async (req, res) => {
   const cp = parseFloat(card_payments);
   const dc = parseFloat(declared_cash);
   const expected_cash = ts - cp;
-  const cash_difference = expected_cash - dc;
+  const cash_difference = dc - expected_cash; // positivo = sobrante, negativo = faltante
 
   // Obtener config y baseline
   const config = getConfig();
@@ -411,10 +423,10 @@ router.post('/', auth, async (req, res) => {
     db.prepare(`
       INSERT INTO cash_register_cuts
         (id, employee_id, schedule_id, register_name, total_sales, card_payments,
-         declared_cash, notes, expected_cash, cash_difference, is_anomaly, deviation_pct, date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         declared_cash, notes, expected_cash, cash_difference, is_anomaly, deviation_pct, date, shift_label, submitted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(cutId, req.user.id, scheduleId, register_name.trim(), ts, cp, dc,
-           notes?.trim() || null, expected_cash, cash_difference, is_anomaly, deviation_pct, today);
+           notes?.trim() || null, expected_cash, cash_difference, is_anomaly, deviation_pct, today, shift_label, getLocalISOString());
 
     // UPSERT baseline — recalcular promedio con AVG desde la tabla
     if (baseline) {

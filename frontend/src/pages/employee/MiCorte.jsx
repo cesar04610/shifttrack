@@ -62,7 +62,7 @@ export default function MiCorte() {
           <div className="flex items-center gap-3">
             <span className="text-2xl">✅</span>
             <div>
-              <p className="font-semibold text-green-800">Corte registrado</p>
+              <p className="font-semibold text-green-800">Corte de {shiftData.current_shift?.toLowerCase()} registrado</p>
               <p className="text-sm text-green-600">
                 {hasSchedule && <>Turno {shiftData.schedule.start_time}–{shiftData.schedule.end_time} · </>}
                 Registrado a las {new Date(shiftData.existing_cut.submitted_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
@@ -82,13 +82,15 @@ export default function MiCorte() {
                 }
               </p>
             </div>
-            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">Pendiente de corte</span>
+            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">
+              Turno {shiftData.current_shift} · Pendiente de corte
+            </span>
           </div>
           <button
             onClick={() => setShowForm(true)}
             className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700"
           >
-            Registrar corte de caja
+            Registrar corte de {shiftData.current_shift?.toLowerCase()}
           </button>
         </div>
       )}
@@ -110,6 +112,7 @@ export default function MiCorte() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {cut.register_name}
+                      {cut.shift_label && <> · {cut.shift_label}</>}
                       {cut.start_time && <> · {cut.start_time}–{cut.end_time}</>}
                     </p>
                   </div>

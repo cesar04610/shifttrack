@@ -80,7 +80,8 @@ export default function CajaProveedores() {
 
   const totalSpent = session.total_spent || 0;
   const totalAdditions = session.total_additions || 0;
-  const currentBalance = session.current_balance ?? (session.initial_balance + totalAdditions - totalSpent);
+  const effectiveInitial = session.effective_initial ?? session.initial_balance;
+  const currentBalance = session.current_balance ?? (effectiveInitial + totalAdditions - totalSpent);
 
   return (
     <div>
@@ -93,7 +94,7 @@ export default function CajaProveedores() {
           <div className="space-y-3">
             <div className="bg-white rounded-xl border p-4">
               <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Saldo inicial</p>
-              <p className="text-2xl font-bold text-gray-700 mt-1">${formatMXN(session.initial_balance)}</p>
+              <p className="text-2xl font-bold text-gray-700 mt-1">${formatMXN(effectiveInitial)}</p>
               <button
                 onClick={() => setShowAddBalance(true)}
                 className="mt-2 text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-medium hover:bg-green-100 transition-colors"
