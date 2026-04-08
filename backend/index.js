@@ -73,6 +73,9 @@ app.use('/api/cuts', require('./routes/cuts'));
 // Módulo de Faltantes de Producto
 app.use('/api/shortages', require('./routes/shortages'));
 
+// Módulo de Caja General (Tesorería)
+app.use('/api/treasury', require('./routes/treasury'));
+
 // Servir fotos de evidencia de tareas (requiere autenticación)
 const uploadsPath = process.env.UPLOADS_PATH
   ? path.resolve(process.env.UPLOADS_PATH)

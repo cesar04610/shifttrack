@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Users, CalendarDays, ClipboardCheck,
-  BarChart3, Bell, ShoppingBag, Receipt,
+  BarChart3, Bell, ShoppingBag, Receipt, Wallet,
   KeyRound, LogOut, Store,
 } from 'lucide-react';
 
@@ -15,6 +15,7 @@ const navItems = [
   { to: '/admin/alertas',     label: 'Alertas',     Icon: Bell },
   { to: '/admin/proveedores', label: 'Proveedores', Icon: ShoppingBag },
   { to: '/admin/cortes',      label: 'Cortes',      Icon: Receipt },
+  { to: '/admin/caja-general', label: 'Caja General', Icon: Wallet },
 ];
 
 export default function AdminLayout() {

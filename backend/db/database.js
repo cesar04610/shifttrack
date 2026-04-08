@@ -330,6 +330,47 @@ db.exec(`
   );
 `);
 
+// ─── Módulo de Caja General (Tesorería) ─────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expense_categories (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS treasury_movements (
+    id              TEXT PRIMARY KEY,
+    date            TEXT NOT NULL,
+    movement_type   TEXT NOT NULL CHECK(movement_type IN ('initial_cash','expense','bank_withdrawal','adjustment')),
+    amount          REAL NOT NULL,
+    description     TEXT,
+    category_id     TEXT REFERENCES expense_categories(id),
+    expected_before REAL,
+    declared_amount REAL,
+    created_by      TEXT NOT NULL REFERENCES users(id),
+    is_deleted      INTEGER NOT NULL DEFAULT 0,
+    deleted_at      TEXT,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_treasury_movements_date ON treasury_movements(date);
+  CREATE INDEX IF NOT EXISTS idx_treasury_movements_type ON treasury_movements(movement_type);
+`);
+
+// Categorías de gastos por defecto
+const defaultCategories = [
+  { id: 'cat-proveedores',   name: 'Proveedores' },
+  { id: 'cat-servicios',     name: 'Servicios' },
+  { id: 'cat-limpieza',      name: 'Limpieza' },
+  { id: 'cat-mantenimiento', name: 'Mantenimiento' },
+  { id: 'cat-nomina',        name: 'Nómina' },
+  { id: 'cat-varios',        name: 'Varios' },
+];
+for (const cat of defaultCategories) {
+  db.prepare('INSERT OR IGNORE INTO expense_categories (id, name) VALUES (?, ?)').run(cat.id, cat.name);
+}
+
 // ─── Migración: agregar columna date a cash_register_cuts ───────────────────
 {
   const cols = db.prepare("PRAGMA table_info(cash_register_cuts)").all().map(c => c.name);

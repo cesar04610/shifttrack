@@ -10,6 +10,7 @@ import AlertConfig from './pages/AlertConfig';
 import Tasks from './pages/Tasks';
 import ProveedoresAnalytics from './pages/admin/ProveedoresAnalytics';
 import Cortes from './pages/admin/Cortes';
+import CajaGeneral from './pages/admin/CajaGeneral';
 import EmployeeLayout from './components/EmployeeLayout';
 import MySchedule from './pages/MySchedule';
 import ClockPage from './pages/ClockPage';
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="alertas" element={<AlertConfig />} />
           <Route path="proveedores" element={<ProveedoresAnalytics />} />
           <Route path="cortes" element={<Cortes />} />
+          <Route path="caja-general" element={<CajaGeneral />} />
           <Route path="contrasena" element={<ChangePassword />} />
         </Route>
 
