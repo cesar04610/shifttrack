@@ -61,7 +61,6 @@ async function checkTicketAlert(supplierId, ticketId, ticketAmount) {
   const timeStr = now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 
   const emailSent = await sendMail({
-    to: process.env.ADMIN_EMAIL,
     subject: `[Mostrador Modelorama] ⚠️ Ticket inusual — ${supplier.company_name} | ${dayName} ${now.toLocaleDateString('es-MX')}`,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:560px;">

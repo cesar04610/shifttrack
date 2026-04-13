@@ -193,6 +193,36 @@ router.post('/', auth, async (req, res) => {
   res.status(201).json({ ticket, current_balance, alert });
 });
 
+// ─── GET /api/tickets/alerts — listar alertas de tickets (admin) ─────────────
+router.get('/alerts', auth, requireAdmin, (req, res) => {
+  const alerts = db.prepare(`
+    SELECT ta.*, s.company_name AS supplier_name, u.name AS employee_name
+    FROM ticket_alerts ta
+    JOIN suppliers s ON ta.supplier_id = s.id
+    JOIN purchase_tickets pt ON ta.ticket_id = pt.id
+    JOIN users u ON pt.employee_id = u.id
+    WHERE ta.created_at >= datetime('now', '-7 days')
+    ORDER BY ta.created_at DESC
+    LIMIT 200
+  `).all();
+  res.json(alerts);
+});
+
+// ─── PATCH /api/tickets/alerts/seen-all — marcar todas como vistas (admin) ───
+// DEBE ir ANTES de /alerts/:id/seen para no ser capturado como /:id
+router.patch('/alerts/seen-all', auth, requireAdmin, (req, res) => {
+  db.prepare("UPDATE ticket_alerts SET is_seen = 1, seen_at = CURRENT_TIMESTAMP WHERE is_seen = 0").run();
+  res.json({ message: 'Marcadas como vistas' });
+});
+
+// ─── PATCH /api/tickets/alerts/:id/seen — marcar una alerta como vista ───────
+router.patch('/alerts/:id/seen', auth, requireAdmin, (req, res) => {
+  const alert = db.prepare("SELECT id FROM ticket_alerts WHERE id = ?").get(req.params.id);
+  if (!alert) return res.status(404).json({ error: 'Alerta no encontrada' });
+  db.prepare("UPDATE ticket_alerts SET is_seen = 1, seen_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+  res.json({ message: 'Marcada como vista' });
+});
+
 // ─── POST /api/tickets/:id/void — anular ticket (máx. 5 minutos) ─────────────
 router.post('/:id/void', auth, (req, res) => {
   if (req.user.role !== 'employee') {

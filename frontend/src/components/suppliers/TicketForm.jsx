@@ -11,7 +11,7 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [warning, setWarning] = useState(null); // { historical_avg, deviation_pct, day_name }
-  const [confirmStep, setConfirmStep] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const checkTimeout = useRef(null);
@@ -19,7 +19,7 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
   // Verificar alerta cada vez que cambia proveedor o monto
   useEffect(() => {
     setWarning(null);
-    setConfirmStep(false);
+    setShowConfirmModal(false);
     if (!supplierId || !amount || parseFloat(amount) <= 0) return;
 
     clearTimeout(checkTimeout.current);
@@ -40,11 +40,11 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
     return () => clearTimeout(checkTimeout.current);
   }, [supplierId, amount]);
 
-  const handleConfirmClick = () => {
+  const handleSubmitClick = () => {
     if (!supplierId) { toast.error('Selecciona un proveedor'); return; }
     if (!amount || parseFloat(amount) <= 0) { toast.error('Ingresa un monto válido'); return; }
-    if (warning && !confirmStep) {
-      setConfirmStep(true); // Muestra la advertencia para confirmar
+    if (warning) {
+      setShowConfirmModal(true);
       return;
     }
     submitTicket();
@@ -58,7 +58,6 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
       onSaved(res.data.current_balance);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al registrar ticket');
-      setConfirmStep(false);
     } finally {
       setLoading(false);
     }
@@ -81,7 +80,7 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
             </label>
             <select
               value={supplierId}
-              onChange={e => { setSupplierId(e.target.value); setConfirmStep(false); }}
+              onChange={e => setSupplierId(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Seleccionar proveedor —</option>
@@ -109,7 +108,7 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
                 min="0.01"
                 step="0.01"
                 value={amount}
-                onChange={e => { setAmount(e.target.value); setConfirmStep(false); }}
+                onChange={e => setAmount(e.target.value)}
                 className="w-full border rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="0.00"
               />
@@ -129,20 +128,17 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
             />
           </div>
 
-          {/* Advertencia de ticket inusual */}
+          {/* Indicador de advertencia (solo informativo) */}
           {warning && (
             <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
               <div className="flex items-start gap-2">
                 <span className="text-amber-500 text-lg">⚠️</span>
                 <div className="text-sm">
-                  <p className="font-semibold text-amber-800">Ticket inusual</p>
+                  <p className="font-semibold text-amber-800">Monto inusual detectado</p>
                   <p className="text-amber-700 mt-0.5">
                     Este monto es <strong>+{warning.deviation_pct}%</strong> mayor al promedio del{' '}
                     <strong>{warning.day_name}</strong> (${formatMXN(warning.historical_avg)}).
                   </p>
-                  {confirmStep && (
-                    <p className="text-amber-700 font-medium mt-1">¿Deseas confirmar de todas formas?</p>
-                  )}
                 </div>
               </div>
             </div>
@@ -159,16 +155,56 @@ export default function TicketForm({ suppliers, onSaved, onCancel }) {
           </button>
           <button
             type="button"
-            onClick={handleConfirmClick}
+            onClick={handleSubmitClick}
             disabled={loading}
-            className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 ${
-              confirmStep ? 'bg-amber-500 hover:bg-amber-600' : 'bg-blue-600 hover:bg-blue-700'
-            }`}
+            className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
-            {loading ? 'Registrando...' : confirmStep ? 'Sí, confirmar' : 'Registrar'}
+            {loading ? 'Registrando...' : 'Registrar'}
           </button>
         </div>
       </div>
+
+      {/* Modal de confirmación cuando el monto excede el promedio */}
+      {showConfirmModal && warning && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="text-amber-500 text-2xl mt-0.5">⚠️</span>
+              <div>
+                <h3 className="font-semibold text-gray-900 text-base">Gasto fuera del rango normal</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Este gasto excede el rango normal de este proveedor.
+                </p>
+                <p className="text-sm text-gray-600 mt-1">
+                  El promedio del <strong>{warning.day_name}</strong> es{' '}
+                  <strong>${formatMXN(warning.historical_avg)}</strong>. El monto ingresado es{' '}
+                  <strong className="text-red-600">+{warning.deviation_pct}%</strong> mayor al promedio.
+                </p>
+                <p className="text-sm font-medium text-gray-800 mt-3">
+                  ¿De todas formas deseas agregar el gasto?
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="flex-1 px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowConfirmModal(false); submitTicket(); }}
+                disabled={loading}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Registrando...' : 'Sí, agregar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

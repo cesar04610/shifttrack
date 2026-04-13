@@ -550,4 +550,43 @@ for (const cat of defaultCategories) {
   }
 }
 
+// ─── Migración: is_seen y seen_at en ticket_alerts ──────────────────────────
+{
+  const cols = db.prepare("PRAGMA table_info(ticket_alerts)").all().map(c => c.name);
+  if (!cols.includes('is_seen')) {
+    db.exec("ALTER TABLE ticket_alerts ADD COLUMN is_seen INTEGER DEFAULT 0");
+    console.log('[DB] Migración: is_seen agregado a ticket_alerts.');
+  }
+  if (!cols.includes('seen_at')) {
+    db.exec("ALTER TABLE ticket_alerts ADD COLUMN seen_at TEXT");
+    console.log('[DB] Migración: seen_at agregado a ticket_alerts.');
+  }
+}
+
+// ─── Tabla de configuración de email ─────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS email_config (
+    id         TEXT PRIMARY KEY DEFAULT 'default',
+    host       TEXT NOT NULL DEFAULT 'smtp.gmail.com',
+    port       INTEGER NOT NULL DEFAULT 587,
+    user_email TEXT,
+    pass       TEXT,
+    from_name  TEXT NOT NULL DEFAULT 'Mostrador Modelorama',
+    active     INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (CURRENT_TIMESTAMP)
+  );
+`);
+db.exec(`INSERT OR IGNORE INTO email_config (id) VALUES ('default')`);
+
+// ─── Tabla de destinatarios de email ─────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS email_recipients (
+    id         TEXT PRIMARY KEY,
+    email      TEXT UNIQUE NOT NULL,
+    name       TEXT,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (CURRENT_TIMESTAMP)
+  );
+`);
+
 module.exports = db;

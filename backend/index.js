@@ -67,6 +67,9 @@ app.use('/api/sessions', require('./routes/sessions'));
 app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/analytics', require('./routes/analytics'));
 
+// Módulo de Alertas (email config + destinatarios)
+app.use('/api/alerts', require('./routes/alerts'));
+
 // Módulo de Cortes de Caja
 app.use('/api/cuts', require('./routes/cuts'));
 
