@@ -140,6 +140,24 @@ function TabLista({ employees }) {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 border-t-2 border-gray-300">
+                <td colSpan={4} className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Total ({cuts.length} {cuts.length === 1 ? 'corte' : 'cortes'})
+                </td>
+                <td className="px-4 py-3 font-bold text-gray-800 whitespace-nowrap">
+                  ${formatMXN(cuts.reduce((s, c) => s + (c.total_sales || 0), 0))}
+                </td>
+                <td className="px-4 py-3 font-bold text-gray-800 whitespace-nowrap">
+                  ${formatMXN(cuts.reduce((s, c) => s + (c.card_payments || 0), 0))}
+                </td>
+                <td className="px-4 py-3 text-gray-300">—</td>
+                <td className="px-4 py-3 font-bold text-gray-800 whitespace-nowrap">
+                  ${formatMXN(cuts.reduce((s, c) => s + (c.declared_cash || 0), 0))}
+                </td>
+                <td className="px-4 py-3"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -421,6 +439,167 @@ function TabTendencias({ employees }) {
   );
 }
 
+// ── Tab: Agregar Corte Pasado ─────────────────────────────────────────────────
+function TabCortesPasados({ employees }) {
+  const today = new Date().toISOString().split('T')[0];
+  const emptyForm = {
+    employee_id: '',
+    date: today,
+    shift_label: 'Mañana',
+    register_name: 'Caja 1',
+    total_sales: '',
+    card_payments: '',
+    declared_cash: '',
+    notes: '',
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [submitting, setSubmitting] = useState(false);
+
+  const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+
+  const ts = parseFloat(form.total_sales) || 0;
+  const cp = parseFloat(form.card_payments) || 0;
+  const dc = parseFloat(form.declared_cash) || 0;
+  const expectedCash = ts - cp;
+  const difference = dc - expectedCash;
+  const hasValues = form.total_sales !== '' && form.card_payments !== '' && form.declared_cash !== '';
+
+  const diffColor = !hasValues ? 'text-gray-400'
+    : Math.abs(difference) === 0 ? 'text-green-600'
+    : Math.abs(difference) <= 100 ? 'text-yellow-600'
+    : 'text-red-600';
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.employee_id) { toast.error('Selecciona un usuario'); return; }
+    if (!form.date) { toast.error('La fecha es requerida'); return; }
+    if (form.date > today) { toast.error('La fecha no puede ser futura'); return; }
+
+    setSubmitting(true);
+    try {
+      await api.post('/cuts/admin-past', {
+        employee_id: form.employee_id,
+        date: form.date,
+        shift_label: form.shift_label,
+        register_name: form.register_name,
+        total_sales: parseFloat(form.total_sales),
+        card_payments: parseFloat(form.card_payments),
+        declared_cash: parseFloat(form.declared_cash),
+        notes: form.notes.trim() || undefined,
+      });
+      toast.success('Corte pasado registrado correctamente');
+      setForm(emptyForm);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al registrar el corte');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const inputCls = 'w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
+  const labelCls = 'block text-xs font-medium text-gray-600 mb-1';
+
+  return (
+    <div className="max-w-xl mx-auto">
+      <div className="bg-white border rounded-xl p-6 space-y-5">
+        <div>
+          <h2 className="text-base font-semibold text-gray-800">Registrar corte pasado</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Captura un corte de una fecha anterior para un empleado.</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Usuario */}
+          <div>
+            <label className={labelCls}>Usuario *</label>
+            <select value={form.employee_id} onChange={set('employee_id')} required className={inputCls}>
+              <option value="">Selecciona un empleado</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </div>
+
+          {/* Fecha y Turno */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Fecha del corte *</label>
+              <input type="date" value={form.date} max={today} onChange={set('date')} required className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Turno *</label>
+              <select value={form.shift_label} onChange={set('shift_label')} className={inputCls}>
+                <option value="Mañana">Mañana (7:30 – 17:00)</option>
+                <option value="Tarde">Tarde (17:00 en adelante)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Caja */}
+          <div>
+            <label className={labelCls}>Caja *</label>
+            <select value={form.register_name} onChange={set('register_name')} className={inputCls}>
+              <option value="Caja 1">Caja 1</option>
+              <option value="Caja 2">Caja 2</option>
+              <option value="Caja 3">Caja 3</option>
+            </select>
+          </div>
+
+          {/* Montos */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className={labelCls}>Ventas totales *</label>
+              <input type="number" min="0" step="0.01" placeholder="0.00"
+                value={form.total_sales} onChange={set('total_sales')} required className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Pagos con tarjeta *</label>
+              <input type="number" min="0" step="0.01" placeholder="0.00"
+                value={form.card_payments} onChange={set('card_payments')} required className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Efectivo declarado *</label>
+              <input type="number" min="0" step="0.01" placeholder="0.00"
+                value={form.declared_cash} onChange={set('declared_cash')} required className={inputCls} />
+            </div>
+          </div>
+
+          {/* Cálculo en tiempo real */}
+          {hasValues && (
+            <div className="bg-gray-50 rounded-lg p-3 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <p className="text-xs text-gray-500">Efectivo esperado</p>
+                <p className="font-semibold text-gray-800">${(Math.max(0, expectedCash)).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Diferencia</p>
+                <p className={`font-semibold ${diffColor}`}>
+                  {difference >= 0 ? '+' : '-'}${Math.abs(difference).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Notas */}
+          <div>
+            <label className={labelCls}>Notas (opcional)</label>
+            <textarea rows={2} placeholder="Observaciones o motivo del registro retroactivo..."
+              value={form.notes} onChange={set('notes')}
+              className={`${inputCls} resize-none`} />
+          </div>
+
+          {/* Aviso */}
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Este corte quedará registrado en la fecha seleccionada. La acción no se puede deshacer.
+          </div>
+
+          <button type="submit" disabled={submitting}
+            className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+            {submitting ? 'Registrando...' : 'Registrar corte pasado'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function Cortes() {
   const [tab, setTab] = useState('lista');
@@ -437,6 +616,7 @@ export default function Cortes() {
     { id: 'alertas',  label: `Alertas${summary?.unseen_alerts ? ` (${summary.unseen_alerts})` : ''}` },
     { id: 'promedios', label: 'Promedios' },
     { id: 'tendencias', label: 'Tendencias' },
+    { id: 'pasados',   label: 'Agregar corte pasado' },
   ];
 
   return (
@@ -480,6 +660,7 @@ export default function Cortes() {
         {tab === 'alertas' && <TabAlertas />}
         {tab === 'promedios' && <TabPromedios />}
         {tab === 'tendencias' && <TabTendencias employees={employees} />}
+        {tab === 'pasados' && <TabCortesPasados employees={employees} />}
       </div>
     </div>
   );

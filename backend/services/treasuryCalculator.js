@@ -14,11 +14,11 @@ function getInitialCash(date) {
 }
 
 /**
- * Suma de ventas en efectivo (expected_cash) de cortes en un rango de fechas.
+ * Suma de ventas en efectivo (declared_cash) de cortes en un rango de fechas.
  */
 function getCashSalesRange(fromDate, toDate) {
   const row = db.prepare(`
-    SELECT COALESCE(SUM(expected_cash), 0) AS total
+    SELECT COALESCE(SUM(declared_cash), 0) AS total
     FROM cash_register_cuts
     WHERE date >= ? AND date <= ?
   `).get(fromDate, toDate);
@@ -198,7 +198,7 @@ function getDailySummary(date) {
 
   // Desglose del día
   const cashSalesRow = db.prepare(`
-    SELECT COALESCE(SUM(expected_cash), 0) AS total
+    SELECT COALESCE(SUM(declared_cash), 0) AS total
     FROM cash_register_cuts WHERE date = ?
   `).get(date);
 

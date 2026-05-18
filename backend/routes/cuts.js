@@ -345,6 +345,121 @@ router.get('/:id', auth, requireAdmin, (req, res) => {
   res.json(cut);
 });
 
+// ── POST /api/cuts/admin-past — registrar corte pasado (solo admin) ──────────
+router.post('/admin-past', auth, requireAdmin, (req, res) => {
+  const { employee_id, date, shift_label, register_name, total_sales, card_payments, declared_cash, notes } = req.body;
+
+  // Validaciones básicas
+  if (!employee_id) return res.status(400).json({ error: 'El usuario es requerido' });
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'La fecha es requerida (YYYY-MM-DD)' });
+  if (!['Mañana', 'Tarde'].includes(shift_label)) return res.status(400).json({ error: 'El turno debe ser Mañana o Tarde' });
+  if (!register_name?.trim()) return res.status(400).json({ error: 'El nombre de la caja es requerido' });
+  if (total_sales === undefined || total_sales === null) return res.status(400).json({ error: 'Las ventas totales son requeridas' });
+  if (card_payments === undefined || card_payments === null) return res.status(400).json({ error: 'Los pagos con tarjeta son requeridos' });
+  if (declared_cash === undefined || declared_cash === null) return res.status(400).json({ error: 'El efectivo declarado es requerido' });
+  if (parseFloat(total_sales) < 0 || parseFloat(card_payments) < 0 || parseFloat(declared_cash) < 0) {
+    return res.status(400).json({ error: 'Los valores no pueden ser negativos' });
+  }
+
+  // Verificar que el empleado exista
+  const employee = db.prepare('SELECT id FROM users WHERE id = ? AND role = ?').get(employee_id, 'employee');
+  if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+  // Verificar que no exista corte duplicado para ese empleado/fecha/turno
+  const existingCut = db.prepare(
+    'SELECT id FROM cash_register_cuts WHERE employee_id = ? AND date = ? AND shift_label = ?'
+  ).get(employee_id, date, shift_label);
+  if (existingCut) {
+    return res.status(409).json({ error: `Ya existe un corte de ${shift_label.toLowerCase()} para ese usuario en esa fecha` });
+  }
+
+  // Cálculos
+  const ts = parseFloat(total_sales);
+  const cp = parseFloat(card_payments);
+  const dc = parseFloat(declared_cash);
+  const expected_cash = ts - cp;
+  const cash_difference = dc - expected_cash;
+
+  const config = getConfig();
+  const isoDay = getIsoDay(date);
+
+  const baseline = db.prepare(`
+    SELECT * FROM cut_baselines
+    WHERE employee_id = ? AND register_name = ? AND day_of_week = ?
+  `).get(employee_id, register_name.trim(), isoDay);
+
+  let is_anomaly = 0;
+  let deviation_pct = null;
+  if (baseline && baseline.sample_count >= config.min_samples_for_anomaly && baseline.avg_total_sales > 0) {
+    const dev = Math.abs((ts - baseline.avg_total_sales) / baseline.avg_total_sales * 100);
+    if (dev > config.anomaly_threshold_pct) {
+      is_anomaly = 1;
+      deviation_pct = parseFloat(dev.toFixed(2));
+    }
+  }
+
+  try {
+    db.exec('BEGIN');
+
+    const cutId = uuidv4();
+    // submitted_at se registra como si fuera ahora (momento en que el admin lo captura)
+    db.prepare(`
+      INSERT INTO cash_register_cuts
+        (id, employee_id, schedule_id, register_name, total_sales, card_payments,
+         declared_cash, notes, expected_cash, cash_difference, is_anomaly, deviation_pct, date, shift_label, submitted_at)
+      VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(cutId, employee_id, register_name.trim(), ts, cp, dc,
+           notes?.trim() || null, expected_cash, cash_difference, is_anomaly, deviation_pct, date, shift_label, getLocalISOString());
+
+    // UPSERT baseline
+    if (baseline) {
+      const newAvg = db.prepare(`
+        SELECT AVG(c.total_sales) AS avg
+        FROM cash_register_cuts c
+        WHERE c.employee_id = ? AND c.register_name = ?
+          AND CASE WHEN strftime('%w', COALESCE(c.date, (SELECT s.date FROM schedules s WHERE s.id = c.schedule_id))) = '0' THEN 7
+                   ELSE CAST(strftime('%w', COALESCE(c.date, (SELECT s.date FROM schedules s WHERE s.id = c.schedule_id))) AS INTEGER) END = ?
+      `).get(employee_id, register_name.trim(), isoDay);
+
+      db.prepare(`
+        UPDATE cut_baselines SET
+          avg_total_sales = ?, sample_count = sample_count + 1, last_updated = CURRENT_TIMESTAMP
+        WHERE employee_id = ? AND register_name = ? AND day_of_week = ?
+      `).run(newAvg.avg, employee_id, register_name.trim(), isoDay);
+    } else {
+      db.prepare(`
+        INSERT INTO cut_baselines (id, employee_id, register_name, day_of_week, avg_total_sales, sample_count)
+        VALUES (?, ?, ?, ?, ?, 1)
+      `).run(uuidv4(), employee_id, register_name.trim(), isoDay, ts);
+    }
+
+    if (is_anomaly) {
+      db.prepare(`
+        INSERT INTO cut_alerts (id, alert_type, employee_id, schedule_id, cut_id,
+          deviation_pct, avg_reference, sample_count)
+        VALUES (?, 'anomaly_detected', ?, NULL, ?, ?, ?, ?)
+      `).run(uuidv4(), employee_id, cutId, deviation_pct,
+             baseline?.avg_total_sales || null, baseline?.sample_count || null);
+    }
+
+    db.exec('COMMIT');
+
+    const cut = db.prepare(`
+      SELECT c.*, COALESCE(c.date, s.date) AS shift_date, s.start_time, s.end_time, u.name AS employee_name
+      FROM cash_register_cuts c
+      LEFT JOIN schedules s ON c.schedule_id = s.id
+      JOIN users u ON c.employee_id = u.id
+      WHERE c.id = ?
+    `).get(cutId);
+
+    res.status(201).json({ cut, is_anomaly: is_anomaly === 1, deviation_pct });
+  } catch (err) {
+    db.exec('ROLLBACK');
+    console.error('[CUTS] Error al registrar corte pasado:', err.message);
+    res.status(500).json({ error: 'Error interno al registrar el corte' });
+  }
+});
+
 // ── POST /api/cuts — registrar corte ─────────────────────────────────────────
 router.post('/', auth, async (req, res) => {
   if (req.user.role !== 'employee') {
